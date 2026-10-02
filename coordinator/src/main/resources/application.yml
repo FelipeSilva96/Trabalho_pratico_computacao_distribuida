@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: distributed-waste-coordinator
+  servlet:
+    multipart:
+      max-file-size: 15MB
+      max-request-size: 100MB
+
+server:
+  port: 8080
+
+workers:
+  addresses: ${WORKER_ADDRESSES:localhost:50051,localhost:50052}
+
+grpc:
+  deadline-ms: ${GRPC_DEADLINE_MS:4000}

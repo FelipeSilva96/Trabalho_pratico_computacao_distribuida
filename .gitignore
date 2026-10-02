@@ -1,0 +1,28 @@
+# Java
+coordinator/target/
+*.class
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Modelos e dados
+worker/models/*.pt
+worker/models/*.pth
+worker/models/*.onnx
+dataset/
+data/
+
+# Ambiente
+.env
