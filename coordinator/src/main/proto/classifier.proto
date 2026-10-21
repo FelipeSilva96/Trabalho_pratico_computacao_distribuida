@@ -7,10 +7,19 @@ option java_package = "br.pucminas.cd.waste.proto";
 option java_outer_classname = "ClassifierProto";
 
 service ClassifierService {
-  rpc Classify (ClassifyRequest) returns (ClassifyResponse);
-  rpc Health (HealthRequest) returns (HealthResponse);
+
+  rpc Classify (ClassifyRequest)
+      returns (ClassifyResponse);
+
+  rpc Segment (SegmentRequest)
+      returns (SegmentResponse);
+
+  rpc Health (HealthRequest)
+      returns (HealthResponse);
+
 }
 
+// Classificação original
 message ClassifyRequest {
   string request_id = 1;
   string filename = 2;
@@ -30,6 +39,42 @@ message ClassifyResponse {
   bool demo_mode = 9;
 }
 
+// Nova operação de segmentação
+message SegmentRequest {
+
+  string request_id = 1;
+
+  string tile_id = 2;
+
+  bytes tile_png = 3;
+
+  int32 target_segments = 4;
+
+  double compactness = 5;
+
+  int64 logical_time = 6;
+
+}
+
+message SegmentResponse {
+
+  string request_id = 1;
+
+  string tile_id = 2;
+
+  bytes result_png = 3;
+
+  string worker_id = 4;
+
+  string status = 5;
+
+  int64 logical_time = 6;
+
+  int64 processing_time_ms = 7;
+
+}
+
+// Verificação de saúde
 message HealthRequest {
   int64 logical_time = 1;
 }
