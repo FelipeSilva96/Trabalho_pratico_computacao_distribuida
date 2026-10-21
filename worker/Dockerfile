@@ -9,6 +9,7 @@ COPY proto ./proto
 COPY app.py .
 COPY lamport.py .
 COPY classifier.py .
+COPY segmenter.py .
 
 RUN python -m grpc_tools.protoc \
     -I./proto \
