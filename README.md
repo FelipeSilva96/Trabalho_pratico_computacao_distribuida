@@ -538,9 +538,9 @@ docker compose logs --tail=150 coordinator worker-1 worker-2
 - **Interface web antiga:** uma futura página poderá oferecer visualização lado a lado, upload, seleção de grade e tempos.
 - **Testes incompletos:** faltam testes de integração ponta a ponta automatizados e testes isolados de SLIC sob múltiplos parâmetros.
 
-## Participantes, IA e referências
+## Participantes, IA e referências (em andamento)
 
-**Integrantes (grupo de cinco estudantes):**
+**Integrantes:**
 
 - Mateus Resende Ottoni
 - Felipe Pereira da Silva
@@ -548,24 +548,6 @@ docker compose logs --tail=150 coordinator worker-1 worker-2
 - Kauan Gabriel Pereira
 - Diego Feitosa
 
-### Proposta de divisão equilibrada de responsabilidade
-
-Para revisão e continuidade do projeto, propõe-se: **Mateus** — algoritmo SLIC, experimentos de parâmetros e verificação visual; **Felipe** — coordenador Java, endpoints REST, divisão e reconstrução; **Rikerson** — contrato gRPC, comunicação e Lamport; **Kauan** — Docker Compose, portabilidade e testes de inicialização; **Diego** — evidências, experimentos de falha, documentação e revisão do relatório.
-
-**Essas atribuições são uma proposta a ser verificada e assumida pelo grupo, não a alegação de que o histórico de execução já comprova a participação individual.** Antes da entrega acadêmica, cada integrante deve revisar e testar de fato sua frente e confirmar a descrição no relatório.
-
-### Uso de inteligência artificial
-
-O ChatGPT foi utilizado como ferramenta de apoio à interpretação do enunciado, levantamento da arquitetura, revisão do código, geração de propostas de implementação, explicação de erros, elaboração de procedimentos de teste e organização da documentação/relatório. A execução dos comandos e a coleta das medições ocorreram no ambiente do grupo, conforme os registros compartilhados. O uso de IA deve ser declarado ao professor conforme a orientação dada à turma, sem substituir a responsabilidade dos integrantes por compreender, validar e apresentar o sistema.
-
-### Referências técnicas
-
-- Achanta, R. et al. (2012). *SLIC Superpixels Compared to State-of-the-Art Superpixel Methods*. IEEE TPAMI 34(11), 2274–2282.
-- Lamport, L. (1978). *Time, Clocks, and the Ordering of Events in a Distributed System*. Communications of the ACM 21(7), 558–565.
-- van der Walt, S. et al. (2014). *scikit-image: Image Processing in Python*. PeerJ 2:e453.
-- [gRPC](https://grpc.io/docs/)
-- [scikit-image / SLIC](https://scikit-image.org/docs/stable/api/skimage.segmentation.html#skimage.segmentation.slic)
-- [Docker Compose](https://docs.docker.com/compose/)
 
 ---
 
