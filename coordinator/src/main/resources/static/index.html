@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Classificação Distribuída de Resíduos</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 880px; margin: 40px auto; padding: 0 20px; }
+        h1 { margin-bottom: 8px; }
+        .muted { color: #666; }
+        .box { border: 1px solid #ddd; border-radius: 10px; padding: 20px; margin-top: 24px; }
+        button { padding: 10px 16px; cursor: pointer; }
+        pre { background: #f6f6f6; padding: 16px; overflow: auto; border-radius: 8px; }
+    </style>
+</head>
+<body>
+<h1>Classificação Distribuída de Resíduos</h1>
+<p class="muted">Cliente simples para demonstrar o Web Service REST e a distribuição entre workers gRPC.</p>
+
+<div class="box">
+    <h2>Enviar imagens</h2>
+    <input id="files" type="file" accept="image/*" multiple>
+    <button onclick="classify()">Classificar</button>
+</div>
+
+<div class="box">
+    <h2>Workers</h2>
+    <button onclick="loadWorkers()">Atualizar</button>
+    <pre id="workers">Clique em atualizar.</pre>
+</div>
+
+<div class="box">
+    <h2>Resultado</h2>
+    <pre id="result">Nenhuma classificação realizada.</pre>
+</div>
+
+<script>
+async function classify() {
+    const input = document.getElementById('files');
+    if (!input.files.length) {
+        alert('Escolha pelo menos uma imagem.');
+        return;
+    }
+
+    const form = new FormData();
+    for (const file of input.files) {
+        form.append('files', file);
+    }
+
+    document.getElementById('result').textContent = 'Processando...';
+
+    try {
+        const response = await fetch('/api/classify', { method: 'POST', body: form });
+        const data = await response.json();
+        document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+    } catch (error) {
+        document.getElementById('result').textContent = String(error);
+    }
+}
+
+async function loadWorkers() {
+    try {
+        const response = await fetch('/api/workers');
+        const data = await response.json();
+        document.getElementById('workers').textContent = JSON.stringify(data, null, 2);
+    } catch (error) {
+        document.getElementById('workers').textContent = String(error);
+    }
+}
+</script>
+</body>
+</html>

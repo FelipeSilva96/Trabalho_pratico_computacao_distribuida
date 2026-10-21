@@ -1,0 +1,4 @@
+grpcio>=1.68,<2
+grpcio-tools>=1.68,<2
+protobuf>=5.28,<6
+Pillow>=10.4,<12

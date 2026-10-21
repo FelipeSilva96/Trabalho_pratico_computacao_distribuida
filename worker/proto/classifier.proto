@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package classifier;
+
+option java_multiple_files = true;
+option java_package = "br.pucminas.cd.waste.proto";
+option java_outer_classname = "ClassifierProto";
+
+service ClassifierService {
+  rpc Classify (ClassifyRequest) returns (ClassifyResponse);
+  rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+message ClassifyRequest {
+  string request_id = 1;
+  string filename = 2;
+  bytes image = 3;
+  int64 logical_time = 4;
+}
+
+message ClassifyResponse {
+  string request_id = 1;
+  string filename = 2;
+  string label = 3;
+  double confidence = 4;
+  string worker_id = 5;
+  string status = 6;
+  int64 logical_time = 7;
+  int64 processing_time_ms = 8;
+  bool demo_mode = 9;
+}
+
+message HealthRequest {
+  int64 logical_time = 1;
+}
+
+message HealthResponse {
+  string worker_id = 1;
+  string status = 2;
+  int64 logical_time = 3;
+  bool model_loaded = 4;
+  bool demo_mode = 5;
+}

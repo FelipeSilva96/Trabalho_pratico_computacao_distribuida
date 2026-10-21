@@ -1,0 +1,53 @@
+services:
+  coordinator:
+    build:
+      context: ./coordinator
+    container_name: cd-waste-coordinator
+    environment:
+      WORKER_ADDRESSES: worker-1:50051,worker-2:50051
+      GRPC_DEADLINE_MS: 4000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - worker-1
+      - worker-2
+    networks:
+      - cd-network
+
+  worker-1:
+    build:
+      context: ./worker
+    container_name: cd-waste-worker-1
+    environment:
+      WORKER_ID: worker-1
+      GRPC_PORT: 50051
+      GRPC_THREADS: 4
+      MODEL_PATH: /app/models/waste_mobilenet_v3_small.pt
+      ALLOW_DEMO_CLASSIFIER: "true"
+    volumes:
+      - ./worker/models:/app/models:ro
+    ports:
+      - "50051:50051"
+    networks:
+      - cd-network
+
+  worker-2:
+    build:
+      context: ./worker
+    container_name: cd-waste-worker-2
+    environment:
+      WORKER_ID: worker-2
+      GRPC_PORT: 50051
+      GRPC_THREADS: 4
+      MODEL_PATH: /app/models/waste_mobilenet_v3_small.pt
+      ALLOW_DEMO_CLASSIFIER: "true"
+    volumes:
+      - ./worker/models:/app/models:ro
+    ports:
+      - "50052:50051"
+    networks:
+      - cd-network
+
+networks:
+  cd-network:
+    driver: bridge
