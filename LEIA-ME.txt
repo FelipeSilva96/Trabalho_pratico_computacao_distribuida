@@ -1,0 +1,33 @@
+ETAPA: segmentacao distribuida por blocos - PUC Minas
+
+O pacote adiciona 4 classes Java novas e 1 teste JUnit. Nao sobrescreve
+as classes existentes nem o endpoint POST /api/segment.
+
+1. Descompacte este pacote NA RAIZ do projeto:
+   cd ~/Desktop/Trabalho_pratico_computacao_distribuida
+   unzip ~/Downloads/segmentacao_distribuida_etapa_blocos.zip -d .
+
+2. Execute o teste:
+   cd coordinator && mvn test && cd ..
+   (Se Maven nao estiver instalado localmente, use Docker para o build,
+    mas lembre-se de que o Dockerfile atual usa -DskipTests.)
+
+3. Reconstrua o coordenador:
+   sudo docker compose up -d --build coordinator
+
+4. Teste o novo endpoint:
+   curl -fS -D headers_distribuidos.txt \
+      -F 'file=@/home/felipe/Desktop/Base_unica/glass/glass1.jpg' \
+      -F 'segments=100' -F 'compactness=8.0' \
+      -F 'rows=2' -F 'cols=2' \
+      http://localhost:8080/api/segment-distributed \
+      --output resultado_distribuido.png
+   cat headers_distribuidos.txt
+   sudo docker compose logs --tail=100 coordinator
+
+CUIDADOS:
+- Cada tile e segmentado independentemente. Nao se espera equivalencia
+  pixel a pixel com SLIC executado na imagem inteira.
+- Os headers X-Worker-Ids e X-Tile-Workers devem identificar os workers.
+- O recebimento de todos os blocos e obrigatorio para montar o resultado.
+- O deadline gRPC atual pode precisar aumentar para imagens maiores.

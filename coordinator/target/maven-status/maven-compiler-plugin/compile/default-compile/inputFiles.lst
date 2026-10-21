@@ -1,13 +1,19 @@
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/CoordinatorApplication.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/clock/LamportClock.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/controller/ClassificationController.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/controller/DistributedTiledSegmentationController.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/controller/HealthController.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/controller/SegmentationController.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/dto/BatchClassificationResponse.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/dto/ClassificationResult.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/dto/WorkerHealth.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/grpc/WorkerClient.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/grpc/WorkerPool.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/image/ImageAssembler.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/image/ImageTiler.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/service/DistributedClassificationService.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/service/DistributedSegmentationService.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/src/main/java/br/pucminas/cd/waste/service/DistributedTiledSegmentationService.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/grpc-java/br/pucminas/cd/waste/proto/ClassifierServiceGrpc.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/ClassifierProto.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/ClassifyRequest.java
@@ -18,3 +24,7 @@
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/HealthRequestOrBuilder.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/HealthResponse.java
 /home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/HealthResponseOrBuilder.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/SegmentRequest.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/SegmentRequestOrBuilder.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/SegmentResponse.java
+/home/felipe/Desktop/Trabalho_pratico_computacao_distribuida/coordinator/target/generated-sources/protobuf/java/br/pucminas/cd/waste/proto/SegmentResponseOrBuilder.java

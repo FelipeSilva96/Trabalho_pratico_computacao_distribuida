@@ -1,0 +1,11 @@
+HTTP/1.1 200 
+X-Request-Id: a85df286-0d68-4757-b75a-d1288e2c7674
+X-Tiles: 4
+X-Total-Time-Ms: 701
+X-Coordinator-Lamport: 10
+X-Worker-Ids: worker-1,worker-2
+X-Tile-Workers: r0c0=worker-1,r0c1=worker-2,r1c0=worker-1,r1c1=worker-2
+Content-Type: image/png
+Content-Length: 32619
+Date: Wed, 21 Oct 2026 10:28:29 GMT
+
