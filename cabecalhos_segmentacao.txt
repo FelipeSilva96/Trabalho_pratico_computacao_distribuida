@@ -1,0 +1,9 @@
+HTTP/1.1 200 
+X-Worker-Id: worker-1
+X-Worker-Lamport: 3
+X-Processing-Time-Ms: 89
+X-Coordinator-Lamport: 4
+Content-Type: image/png
+Content-Length: 28521
+Date: Wed, 21 Oct 2026 10:14:34 GMT
+
