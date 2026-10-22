@@ -4,8 +4,6 @@ Implementação do **Trabalho Prático de Computação Distribuída — PUC Mina
 
 > **Escopo implementado:** segmentação SLIC **independente por bloco** (não equivale exatamente à segmentação SLIC global da imagem). Os testes publicados foram realizados com **dois containers workers e um coordenador na mesma máquina física**. Não há demonstração de aceleração (*speedup*) em comparação controlada com uma implementação sequencial.
 
-**Repositório:** <https://github.com/FelipeSilva96/Trabalho_pratico_computacao_distribuida> (branch `main`).
-
 ## Índice
 
 1. [O que o sistema faz](#o-que-o-sistema-faz)
