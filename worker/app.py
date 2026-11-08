@@ -13,6 +13,7 @@ from segmenter import segmentar_imagem
 from lamport import LamportClock
 from replica_store import ReplicaConflict, ReplicaCorrupted
 from transaction_participant import TwoPhaseParticipant, TransactionConflict, TransactionCorrupted
+from fault_injection import maybe_crash_before_commit
 
 WORKER_ID = os.getenv("WORKER_ID", "worker")
 GRPC_PORT = int(os.getenv("GRPC_PORT", "50051"))
@@ -108,6 +109,10 @@ class ClassifierService(classifier_pb2_grpc.ClassifierServiceServicer):
 
     def CommitReplica(self, request, context):
         clock.receive(request.logical_time)
+        # Teste de falha de uso unico, DESATIVADO por padrao.
+        # Quando ativo somente no Windows, mata o worker no primeiro COMMIT
+        # depois que o coordenador persistiu sua decisao global.
+        maybe_crash_before_commit(request.transaction_id, WORKER_ID, REPLICA_DIR)
         state = self._call(context,lambda:participant.commit(request.transaction_id))
         logical=clock.tick()
         print(f"[{WORKER_ID}] COMMIT tx={request.transaction_id} state={state} lamport={logical}",flush=True)

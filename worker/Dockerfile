@@ -9,6 +9,7 @@ COPY classifier.py .
 COPY segmenter.py .
 COPY replica_store.py .
 COPY transaction_participant.py .
+COPY fault_injection.py .
 COPY replica_rpc_cli.py .
 RUN python -m grpc_tools.protoc -I./proto --python_out=. --grpc_python_out=. ./proto/classifier.proto
 EXPOSE 50051
