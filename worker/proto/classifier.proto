@@ -1,32 +1,28 @@
 syntax = "proto3";
-
 package classifier;
-
 option java_multiple_files = true;
 option java_package = "br.pucminas.cd.waste.proto";
 option java_outer_classname = "ClassifierProto";
 
 service ClassifierService {
+  rpc Classify(ClassifyRequest) returns (ClassifyResponse);
+  rpc Segment(SegmentRequest) returns (SegmentResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
 
-  rpc Classify (ClassifyRequest)
-      returns (ClassifyResponse);
-
-  rpc Segment (SegmentRequest)
-      returns (SegmentResponse);
-
-  rpc Health (HealthRequest)
-      returns (HealthResponse);
-
+  // Operacoes do participante 2PC; decisoes globais ficarao no coordenador Java.
+  rpc PrepareReplica(PrepareReplicaRequest) returns (ReplicaOperationResponse);
+  rpc CommitReplica(TransactionDecisionRequest) returns (ReplicaOperationResponse);
+  rpc AbortReplica(TransactionDecisionRequest) returns (ReplicaOperationResponse);
+  rpc ReplicaStatus(ReplicaStatusRequest) returns (ReplicaStatusResponse);
+  rpc ReadReplica(ReadReplicaRequest) returns (ReadReplicaResponse);
 }
 
-// Classificação original
 message ClassifyRequest {
   string request_id = 1;
   string filename = 2;
   bytes image = 3;
   int64 logical_time = 4;
 }
-
 message ClassifyResponse {
   string request_id = 1;
   string filename = 2;
@@ -38,51 +34,69 @@ message ClassifyResponse {
   int64 processing_time_ms = 8;
   bool demo_mode = 9;
 }
-
-// Nova operação de segmentação
 message SegmentRequest {
-
   string request_id = 1;
-
   string tile_id = 2;
-
   bytes tile_png = 3;
-
   int32 target_segments = 4;
-
   double compactness = 5;
-
   int64 logical_time = 6;
-
 }
-
 message SegmentResponse {
-
   string request_id = 1;
-
   string tile_id = 2;
-
   bytes result_png = 3;
-
   string worker_id = 4;
-
   string status = 5;
-
   int64 logical_time = 6;
-
   int64 processing_time_ms = 7;
-
 }
-
-// Verificação de saúde
-message HealthRequest {
-  int64 logical_time = 1;
-}
-
+message HealthRequest { int64 logical_time = 1; }
 message HealthResponse {
   string worker_id = 1;
   string status = 2;
   int64 logical_time = 3;
   bool model_loaded = 4;
   bool demo_mode = 5;
+}
+
+message PrepareReplicaRequest {
+  string transaction_id = 1;
+  string result_id = 2;
+  bytes image_png = 3;
+  string sha256 = 4;
+  int64 logical_time = 5;
+}
+message TransactionDecisionRequest {
+  string transaction_id = 1;
+  int64 logical_time = 2;
+}
+message ReplicaOperationResponse {
+  string transaction_id = 1;
+  string worker_id = 2;
+  string state = 3;
+  int64 logical_time = 4;
+}
+message ReplicaStatusRequest {
+  string transaction_id = 1;
+  int64 logical_time = 2;
+}
+message ReplicaStatusResponse {
+  string transaction_id = 1;
+  string result_id = 2;
+  string sha256 = 3;
+  string state = 4;
+  string worker_id = 5;
+  int64 logical_time = 6;
+}
+message ReadReplicaRequest {
+  string result_id = 1;
+  int64 logical_time = 2;
+}
+message ReadReplicaResponse {
+  string result_id = 1;
+  bytes image_png = 2;
+  string sha256 = 3;
+  string worker_id = 4;
+  int64 logical_time = 5;
 }
