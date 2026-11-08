@@ -1,0 +1,13 @@
+HTTP/1.1 100 
+
+HTTP/1.1 200 
+X-Request-Id: 640cf4b0-f5fb-4ea6-bec5-63b4f01a6c00
+X-Tiles: 4
+X-Total-Time-Ms: 2358
+X-Coordinator-Lamport: 18
+X-Worker-Ids: worker-lubuntu,worker-windows
+X-Tile-Workers: r0c0=worker-lubuntu,r0c1=worker-windows,r1c0=worker-lubuntu,r1c1=worker-windows
+Content-Type: image/png
+Content-Length: 4607902
+Date: Sun, 08 Nov 2026 01:10:07 GMT
+
