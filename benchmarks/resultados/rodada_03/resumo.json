@@ -1,0 +1,140 @@
+{
+  "generated_at_utc": "2026-11-10T00:17:54.465753+00:00",
+  "scenarios": {
+    "dois_workers_com_2pc": {
+      "client_request": {
+        "n": 10,
+        "media_ms": 2406.854,
+        "mediana_ms": 2433.385,
+        "desvio_padrao_ms": 130.4,
+        "p95_ms": 2564.734,
+        "min_ms": 2198.344,
+        "max_ms": 2571.704
+      },
+      "client_end_to_end": {
+        "n": 10,
+        "media_ms": 2550.497,
+        "mediana_ms": 2571.645,
+        "desvio_padrao_ms": 130.691,
+        "p95_ms": 2705.889,
+        "min_ms": 2336.545,
+        "max_ms": 2717.994
+      },
+      "server_segmentation": {
+        "n": 10,
+        "media_ms": 1989.0,
+        "mediana_ms": 2015.0,
+        "desvio_padrao_ms": 132.528,
+        "p95_ms": 2150.75,
+        "min_ms": 1779.0,
+        "max_ms": 2153.0
+      },
+      "client_read": {
+        "n": 10,
+        "media_ms": 118.672,
+        "mediana_ms": 115.701,
+        "desvio_padrao_ms": 15.22,
+        "p95_ms": 142.209,
+        "min_ms": 90.066,
+        "max_ms": 145.161
+      },
+      "all_same_sha256": true
+    },
+    "dois_workers_sem_2pc": {
+      "client_request": {
+        "n": 10,
+        "media_ms": 1973.223,
+        "mediana_ms": 1992.95,
+        "desvio_padrao_ms": 141.091,
+        "p95_ms": 2174.472,
+        "min_ms": 1792.782,
+        "max_ms": 2214.631
+      },
+      "client_end_to_end": {
+        "n": 10,
+        "media_ms": 1987.3,
+        "mediana_ms": 2006.293,
+        "desvio_padrao_ms": 141.602,
+        "p95_ms": 2189.623,
+        "min_ms": 1810.739,
+        "max_ms": 2229.869
+      },
+      "server_segmentation": {
+        "n": 10,
+        "media_ms": 1947.9,
+        "mediana_ms": 1968.5,
+        "desvio_padrao_ms": 140.099,
+        "p95_ms": 2148.6,
+        "min_ms": 1769.0,
+        "max_ms": 2190.0
+      },
+      "client_read": {
+        "n": 10,
+        "media_ms": 0.0,
+        "mediana_ms": 0.0,
+        "desvio_padrao_ms": 0.0,
+        "p95_ms": 0.0,
+        "min_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "all_same_sha256": true
+    },
+    "um_worker_sem_2pc": {
+      "client_request": {
+        "n": 10,
+        "media_ms": 2836.643,
+        "mediana_ms": 2699.899,
+        "desvio_padrao_ms": 193.878,
+        "p95_ms": 3113.8,
+        "min_ms": 2672.992,
+        "max_ms": 3130.939
+      },
+      "client_end_to_end": {
+        "n": 10,
+        "media_ms": 2849.155,
+        "mediana_ms": 2711.943,
+        "desvio_padrao_ms": 194.791,
+        "p95_ms": 3128.531,
+        "min_ms": 2684.798,
+        "max_ms": 3145.72
+      },
+      "server_segmentation": {
+        "n": 10,
+        "media_ms": 2810.5,
+        "mediana_ms": 2675.0,
+        "desvio_padrao_ms": 192.024,
+        "p95_ms": 3084.9,
+        "min_ms": 2651.0,
+        "max_ms": 3102.0
+      },
+      "client_read": {
+        "n": 10,
+        "media_ms": 0.0,
+        "mediana_ms": 0.0,
+        "desvio_padrao_ms": 0.0,
+        "p95_ms": 0.0,
+        "min_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "all_same_sha256": true
+    }
+  },
+  "failed_samples": [],
+  "speedup_one_vs_two_workers_client_e2e": 1.352,
+  "transactional_overhead_client_e2e_percent": 28.18,
+  "metadata": {
+    "image_file": "imagem_teste_grande.jpg",
+    "input_sha256": "d9e411b166784da98f175305ce9d4eac5b34d0f3e27f7467300b417a56e692b0",
+    "expected_output_sha256": "870f39d917ae03fae238b882fc957b7ed85c5b944d9abc8c252b982dda2b9f62",
+    "segments": 500,
+    "compactness": 10.0,
+    "rows": 2,
+    "cols": 2,
+    "single_url": "http://127.0.0.1:8081",
+    "dual_url": "http://127.0.0.1:8080",
+    "warmups_per_scenario": 2,
+    "measurements_per_scenario": 10,
+    "seed": 44,
+    "method": "sequential randomized rounds; client wall-clock perf_counter; transaction includes GET result"
+  }
+}
