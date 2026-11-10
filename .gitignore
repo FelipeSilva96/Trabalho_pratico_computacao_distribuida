@@ -19,3 +19,9 @@ venv/
 /transacao_*.json
 /segmentacao_2pc.json
 /benchmarks_3_rodadas.zip
+
+# Saidas locais de experimentos
+/cabecalhos_*.txt
+/resultado_*.png
+/replica_*.png
+/ANOTACOES.txt
