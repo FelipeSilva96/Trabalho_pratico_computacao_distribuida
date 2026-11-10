@@ -1,0 +1,4 @@
+cenario,descricao,medicoes,media_e2e_ms,mediana_e2e_ms,dp_amostral_e2e_ms,p95_e2e_ms,media_request_ms,media_read_ms,media_segmentacao_servidor_ms
+um_worker_sem_2pc,"1 worker, sem 2PC",30,2796.763,2717.484,138.545,3067.812,2784.033,0.0,2757.067
+dois_workers_sem_2pc,"2 workers, sem 2PC",30,1956.469,1907.288,145.886,2200.924,1943.159,0.0,1917.833
+dois_workers_com_2pc,2 workers + 2PC,30,2482.777,2419.334,132.057,2704.775,2337.059,120.684,1915.7
