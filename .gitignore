@@ -1,0 +1,21 @@
+# Java / Maven
+/coordinator/target/
+*.class
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDEs
+.idea/
+.vscode/
+
+# Testes locais de benchmark
+/benchmarks/teste_rapido/
+
+# Arquivos temporarios dos testes transacionais
+/transacao_*.json
+/segmentacao_2pc.json
+/benchmarks_3_rodadas.zip
