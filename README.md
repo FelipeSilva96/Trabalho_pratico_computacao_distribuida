@@ -1,544 +1,497 @@
-# Segmentação Distribuída de Imagens com SLIC, gRPC e Relógios de Lamport
+# Segmentação distribuída de imagens com SLIC, gRPC e Two-Phase Commit
 
-Implementação do **Trabalho Prático de Computação Distribuída — PUC Minas (2026/2)**. O sistema divide uma imagem em blocos retangulares, envia os blocos a processos trabalhadores (*workers*) Python por meio de **gRPC/Protocol Buffers**, executa **SLIC** (`scikit-image`) em cada bloco e devolve ao cliente a imagem reconstruída pelo **coordenador Java/Spring Boot** via **HTTP REST**.
+**Trabalho Prático de Computação Distribuída · PUC Minas · 2026/2**
 
-> **Escopo implementado:** segmentação SLIC **independente por bloco** (não equivale exatamente à segmentação SLIC global da imagem). Os testes publicados foram realizados com **dois containers workers e um coordenador na mesma máquina física**. Não há demonstração de aceleração (*speedup*) em comparação controlada com uma implementação sequencial.
+![Java](https://img.shields.io/badge/Java-17-orange) ![Python](https://img.shields.io/badge/Python-3.11-blue) ![gRPC](https://img.shields.io/badge/gRPC-Protocol%20Buffers-24599a) ![Docker](https://img.shields.io/badge/Docker-Compose-2496ed) ![2PC](https://img.shields.io/badge/Transa%C3%A7%C3%B5es-Two--Phase%20Commit-118a67)
+
+Sistema acadêmico que divide uma imagem em blocos, distribui sua **segmentação SLIC** entre workers Python por **gRPC**, recompõe o resultado em um coordenador **Java/Spring Boot** e, opcionalmente, **replica o PNG com Two-Phase Commit (2PC)**, armazenamento persistente e recuperação de decisões pendentes.
+
+> **Qual versão utilizar?** A branch **`main`** contém a implementação da primeira entrega. A branch **`features/segunda_entrega`** acrescenta persistência, replicação, coordenador 2PC, testes de falhas e benchmarks. As instruções a seguir descrevem **`features/segunda_entrega`**. As funcionalidades da primeira entrega continuam disponíveis.
+
+> **Importante:** o SLIC é executado **independentemente em cada bloco** da imagem. O resultado não equivale necessariamente a executar SLIC globalmente sobre a imagem inteira. O programa gera uma visualização PNG com contornos dos superpixels, não uma segmentação semântica.
 
 ## Índice
 
-1. [O que o sistema faz](#o-que-o-sistema-faz)
-2. [Arquitetura e comunicação](#arquitetura-e-comunicação)
-3. [Tecnologias e requisitos](#tecnologias-e-requisitos)
-4. [Pré-requisitos](#pré-requisitos)
-5. [Executar com Docker Compose](#executar-com-docker-compose)
-6. [Executar e visualizar a primeira segmentação](#executar-e-visualizar-a-primeira-segmentação)
-7. [Referência da API](#referência-da-api)
-8. [Parâmetros e comportamento do SLIC](#parâmetros-e-comportamento-do-slic)
-9. [Testes automatizados](#testes-automatizados)
-10. [Testar distribuição, paralelismo e recuperação](#testar-distribuição-paralelismo-e-recuperação)
-11. [Resultados experimentais da primeira entrega](#resultados-experimentais-da-primeira-entrega)
-12. [Executar serviços em máquinas diferentes](#executar-serviços-em-máquinas-diferentes)
-13. [Estrutura de arquivos](#estrutura-de-arquivos)
-14. [Solução de problemas](#solução-de-problemas)
-15. [Limitações e melhorias possíveis](#limitações-e-melhorias-possíveis)
-16. [Participantes, IA e referências](#participantes-ia-e-referências)
+- [O projeto e a arquitetura](#o-projeto-e-a-arquitetura)
+- [Requisitos e modos de execução](#requisitos-e-modos-de-execução)
+- [Opção A: uma única máquina com Docker Compose](#opção-a-uma-única-máquina-com-docker-compose)
+- [Opção B: dois computadores físicos — Lubuntu e Windows](#opção-b-dois-computadores-físicos--lubuntu-e-windows)
+- [Exemplos de uso e endpoints](#exemplos-de-uso-e-endpoints)
+- [Persistência, 2PC e recuperação](#persistência-2pc-e-recuperação)
+- [Testes automatizados](#testes-automatizados)
+- [Benchmarks e resultados experimentais](#benchmarks-e-resultados-experimentais)
+- [Estrutura do repositório](#estrutura-do-repositório)
+- [Solução de problemas e segurança](#solução-de-problemas-e-segurança)
+- [Limitações e equipe](#limitações-e-equipe)
 
-## O que o sistema faz
+## O projeto e a arquitetura
 
-Uma única imagem é dividida em uma grade configurável, por exemplo, **2 linhas × 2 colunas**. Cada bloco recebe um ID (`r0c0`, `r0c1`, `r1c0`, `r1c1`), coordenadas de origem, dimensões e dados de imagem codificados em PNG. O coordenador agenda tarefas concorrentes com `CompletableFuture`, escolhe o worker por *round-robin* e usa gRPC para enviar uma solicitação `SegmentRequest`. O worker executa `skimage.segmentation.slic`, realça os limites dos superpixels em vermelho e retorna `SegmentResponse`. O coordenador monta os blocos nas posições originais e devolve o PNG final.
+O cliente envia uma imagem e parâmetros SLIC por **HTTP REST**. O coordenador Java divide a imagem em uma grade (por exemplo, 2 × 2), agenda os blocos concorrentemente e os envia a workers via **gRPC/Protocol Buffers**. Cada worker transforma seu bloco em superpixels com `scikit-image`, desenha os limites e retorna um PNG. O coordenador recompõe os blocos nas posições originais.
 
-A aplicação também preserva um **protótipo anterior de classificação distribuída de resíduos**. Essa função antiga opera por padrão em **modo DEMO**, no qual os rótulos são derivados deterministicamente dos bytes da imagem. **Não confunda o modo DEMO da classificação antiga com a segmentação SLIC: a segmentação usa um algoritmo real.**
-
-### Fluxo simplificado
+Quando o endpoint **transacional** é utilizado, o PNG montado passa também pela replicação persistente:
 
 ```mermaid
-flowchart LR
-    U[Cliente curl / API HTTP] -->|multipart/form-data| C[Coordenador Java / Spring Boot]
-    C --> T[ImageTiler: dividir em blocos]
-    T --> D[Round-robin + CompletableFuture]
-    D -->|gRPC Segment| W1[Worker 1: Python + SLIC]
-    D -->|gRPC Segment| W2[Worker 2: Python + SLIC]
-    W1 -->|PNG + Lamport + ID| A[ImageAssembler]
-    W2 -->|PNG + Lamport + ID| A
-    A -->|image/png + cabeçalhos| U
+flowchart TD
+    U[Cliente HTTP] --> C[Coordenador Java / Spring Boot]
+    C --> T[Divisão em tiles + agendamento]
+    T -->|gRPC Segment| W1[Worker Python 1]
+    T -->|gRPC Segment| W2[Worker Python 2]
+    W1 --> A[Reconstrução do PNG]
+    W2 --> A
+    A -->|Rota sem 2PC: PNG| U
+    A -->|Rota transacional| P[Coordenador 2PC]
+    P -->|PREPARE| R1[(Réplica persistente 1)]
+    P -->|PREPARE| R2[(Réplica persistente 2)]
+    R1 -->|Voto| P
+    R2 -->|Voto| P
+    P --> J[(Journal de decisão durável)]
+    J -->|COMMIT ou ABORT| P
+    P -->|Decisão| R1
+    P -->|Decisão| R2
+    P -->|Estado, IDs e ACKs| U
+    U -->|GET /api/results/resultId| P
 ```
 
-O `ImageTiler` processa larguras e alturas ímpares sem omitir pixels; `ImageAssembler` recompõe os resultados por coordenadas, independentemente da ordem de chegada. O resultado SLIC não é um mapa semântico de objetos (por exemplo, ele não identifica automaticamente cada garrafa).
+Os workers acumulam duas funções: **processamento SLIC** e **participação no 2PC**. Um worker não decide a transação global; apenas responde a `PREPARE`, `COMMIT`, `ABORT`, `ReplicaStatus` e `ReadReplica`. O coordenador registra sua decisão antes de distribuí-la.
 
-## Arquitetura e comunicação
+**Tecnologias:** Java 17, Spring Boot 3.3.5, Maven, Python 3.11, gRPC, Protocol Buffers, NumPy, Pillow, `scikit-image`, SQLite, Docker/Compose e relógios lógicos de Lamport.
 
-| Componente | Responsabilidades | Implementação |
-|---|---|---|
-| **Cliente** | Enviar imagem e parâmetros; salvar/exibir PNG | `curl`, Postman ou outro cliente HTTP |
-| **Coordenador** | Validar imagem, dividir, distribuir, aplicar deadline e nova tentativa, atualizar Lamport, reconstruir resultado | Java 17, Spring Boot 3.3.5 |
-| **Worker 1** | Receber blocos, segmentar, devolver resultado e timestamp | Python 3.11 + servidor gRPC |
-| **Worker 2** | Mesmo processamento, em processo separado | Python 3.11 + servidor gRPC |
-| **Protobuf** | Definir o contrato binário entre Java e Python | `classifier.proto` (cópias no Java e Python) |
+### Entregas implementadas
 
-**Rede padrão Docker Compose:** `cd-network` (bridge). Dentro dessa rede, o coordenador acessa `worker-1:50051` e `worker-2:50051`; ambas são portas **internas**. Na máquina hospedeira, as portas publicadas são **50051** (Worker 1) e **50052** (Worker 2). O serviço HTTP publica a porta **8080**.
-
-A API externa utiliza REST/HTTP; os serviços internos usam gRPC. Cada processo mantém um relógio lógico de Lamport. Quando envia uma mensagem, incrementa seu relógio; ao receber timestamp `T`, executa `C = max(C, T) + 1`. Os clocks são thread-safe (`AtomicLong` em Java e `threading.Lock` em Python). Relógios de Lamport **não sincronizam a hora real** nem determinam concorrência a partir de timestamps numéricos apenas.
-
-## Tecnologias e requisitos
-
-| Tecnologia | Finalidade |
+| Primeira entrega | Segunda entrega |
 |---|---|
-| Java 17, Maven 3.9.9 | Coordenador e build |
-| Spring Boot 3.3.5 | API REST |
-| gRPC Java/Python + Protocol Buffers | Chamadas de procedimentos remotos e serialização |
-| Python 3.11 | Processamento nos workers |
-| Pillow, NumPy, scikit-image | Leitura, matrizes de pixels e algoritmo SLIC |
-| Docker + Docker Compose | Execução de processos em containers isolados |
-| JUnit | Testes Java de Lamport e montagem |
+| Comunicação REST ↔ gRPC | Persistência de resultados e estados locais |
+| Relógios lógicos de Lamport | Duas réplicas persistentes em workers distintos |
+| Divisão e segmentação SLIC em tiles | Two-Phase Commit com decisão global durável |
+| Agendamento e reconstrução | Recuperação de decisões e ACKs pendentes |
+| Nova tentativa/failover básico do processamento | Testes de falha e benchmarks comparativos |
 
-Na primeira entrega foram implementados **RPC**, **relógios lógicos de Lamport** e **Web Services REST**, além de paralelização de tarefas e uma estratégia básica de *failover*. Não existem eleição de líder nem consenso distribuído. O coordenador é um **ponto único de falha**.
+**Não confundir:** o endpoint de **segmentação sem 2PC** pode redirecionar tarefas SLIC para um worker disponível. Já a **gravação 2PC estrita** exige os votos de todos os participantes fixados na transação; não transforma automaticamente uma transação de duas réplicas em uma de uma réplica.
 
-## Pré-requisitos
+## Requisitos e modos de execução
 
-### Opção recomendada: Docker
+- Git e Docker Engine, ou Docker Desktop com backend Linux/WSL2 no Windows.
+- Para a opção A, **Docker Compose v2** (`docker compose`).
+- Para a opção B, dois computadores na mesma rede local, conectividade TCP para a porta gRPC do Windows e firewall configurado adequadamente.
+- `curl` para testar a API; `python3` no host somente para formatar JSON e executar o script de benchmark.
+- Internet na primeira construção das imagens; memória e espaço em disco para Java, Maven, Python e imagens.
 
-- Sistema Linux, Windows com Docker Desktop/WSL2 ou macOS;
-- Docker Engine/CLI funcionando;
-- plugin **Docker Compose v2** (`docker compose`);
-- acesso à internet **na primeira construção** para baixar imagens e dependências;
-- portas **8080, 50051 e 50052** livres no host;
-- armazenamento e memória suficientes para Maven/Java, Python e o processamento das imagens.
+**Escolha uma opção:**
 
-**Não é necessário instalar Java, Python, Maven ou scikit-image no computador hospedeiro** se você usar o Docker Compose. Esses componentes são instalados dentro das imagens durante o build.
+- **A — Uma máquina:** dois workers isolados em containers Docker na mesma máquina. Permite exercitar SLIC, 2PC e persistência, mas **não simula falhas de máquinas físicas independentes**.
+- **B — Duas máquinas:** coordenador e um worker no notebook Lubuntu; o segundo worker no PC Windows. Foi a configuração utilizada nos testes reais do grupo.
 
-Verifique a instalação:
+Para baixar diretamente a segunda entrega:
 
 ```bash
-docker --version
-docker compose version
-docker info
-```
-
-No Linux, se a permissão ao daemon Docker falhar, use `sudo` antes dos comandos `docker`. As operações com `curl`, `git`, `sha256sum` e `mvn` não exigem `sudo` por padrão.
-
-### Opção sem Docker (para desenvolver)
-
-Requer Java 17, Maven, Python 3.11, `pip` e gRPC. Nesse caso, é necessário iniciar manualmente os dois workers e o coordenador, configurar `WORKER_ADDRESSES` e ajustar portas/ambientes. Para reproduzir a configuração testada, **prefira Docker Compose**.
-
-## Executar com Docker Compose
-
-### 1. Clonar o repositório
-
-```bash
-git clone https://github.com/FelipeSilva96/Trabalho_pratico_computacao_distribuida.git
+git clone --branch features/segunda_entrega --single-branch https://github.com/FelipeSilva96/Trabalho_pratico_computacao_distribuida.git
 cd Trabalho_pratico_computacao_distribuida
 ```
 
-Certifique-se de estar na **raiz**, onde está `docker-compose.yml`:
+Quem já tem o repositório deve executar `git switch features/segunda_entrega` e atualizar a branch antes de construir imagens novas. Para obter **somente a primeira entrega**, use `git clone` sem `--branch` e mantenha a `main`.
+
+## Opção A: uma única máquina com Docker Compose
+
+A branch traz `docker-compose.yml`, herdado da primeira entrega. Ele não declara os **volumes persistentes** da implementação transacional. Para testar a **segunda entrega com armazenamento durável**, utilize **`docker-compose.segunda-entrega.yml`**, também presente na raiz do repositório.
+
+> Se já estiver utilizando o ambiente manual da opção B na porta 8080, **não inicie o Compose em paralelo**, pois haverá conflito de portas. Não remova os volumes do ambiente existente para alternar de modo.
+
+**ATENÇÃO: O BUILD A SEGUIR PODE DEMORAR VÁRIOS MINUTOS NA PRIMEIRA EXECUÇÃO, ENQUANTO O DOCKER E O MAVEN BAIXAM DEPENDÊNCIAS.**
 
 ```bash
-ls docker-compose.yml coordinator worker
+docker compose -f docker-compose.segunda-entrega.yml up -d --build
 ```
 
-### 2. Construir e iniciar
+Em distribuições Linux que exigem permissões administrativas, use `sudo docker compose ...`.
+
+Verifique os serviços e a conectividade gRPC:
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.segunda-entrega.yml ps
+curl -fsS http://127.0.0.1:8080/api/workers | python3 -m json.tool
 ```
 
-Se necessário no Linux:
+Esperado: **`worker-1` e `worker-2`, ambos `UP`**. Aguarde a inicialização do Java se a primeira consulta ocorrer cedo demais. No Compose da segunda entrega, o HTTP fica exposto apenas em `127.0.0.1:8080` e o gRPC permanece na rede interna dos containers.
+
+Os volumes nomeados preservam separadamente o journal do coordenador e os dados SQLite/PNG dos workers. Para encerrar **sem excluir os volumes**:
 
 ```bash
-sudo docker compose up -d --build
+docker compose -f docker-compose.segunda-entrega.yml down
 ```
 
-Na primeira execução, o Docker poderá demorar ao baixar imagens-base, dependências Maven e pacotes Python. Construções seguintes aproveitam o cache. O aviso de que `buildx` não está instalado nem sempre impede o build; verifique o resultado final antes de diagnosticar erro.
-
-**Os serviços esperados são:** `cd-waste-coordinator`, `cd-waste-worker-1` e `cd-waste-worker-2`.
-
-### 3. Conferir os processos
+Para iniciar novamente sem reconstruir:
 
 ```bash
-docker compose ps
+docker compose -f docker-compose.segunda-entrega.yml up -d
 ```
 
-Os três devem estar com status `Up`/`running` (essa verificação, sozinha, não garante resposta RPC).
+**NÃO USE `docker compose down -v` NEM REMOVA OS VOLUMES** se quiser preservar as transações e as réplicas.
 
-### 4. Testar HTTP e workers
+## Opção B: dois computadores físicos — Lubuntu e Windows
+
+### Topologia validada no laboratório
+
+| Máquina | IP utilizado no laboratório | Processos |
+|---|---|---|
+| Notebook Lubuntu | `192.168.18.11` | `slic-worker-lubuntu` (gRPC interno) e `slic-coordinator-lan` (HTTP local:8080) |
+| PC Windows | `192.168.18.2` | `slic-worker-windows` (TCP 50051) |
+
+**Esses IPs são exemplos do laboratório, não valores universais.** Use os endereços atribuídos pelo roteador aos seus computadores. No Windows, obtenha o endereço de Ethernet com `ipconfig`; no Linux, use `ip -4 addr`. Confirme que ambos estão na mesma LAN e que a porta 50051/TCP do Windows aceita tráfego **apenas do notebook**. Não exponha o serviço gRPC à internet.
+
+### B.1. PC Windows — construir e iniciar o worker
+
+Abra o **PowerShell** na pasta do projeto. Execute os comandos abaixo **na primeira instalação**, quando o container ainda não existir. Se ele já existir, utilize apenas `docker start slic-worker-windows`.
+
+**ATENÇÃO: A CONSTRUÇÃO DA IMAGEM DO WORKER PODE DEMORAR VÁRIOS MINUTOS NA PRIMEIRA EXECUÇÃO.**
+
+```powershell
+docker build -t cd-slic-worker .\worker
+```
+
+```powershell
+docker run -d --name slic-worker-windows -p 50051:50051 -e WORKER_ID=worker-windows -e GRPC_PORT=50051 -e GRPC_THREADS=4 -e REPLICA_DIR=/app/data -v slic-replica-windows:/app/data --restart unless-stopped cd-slic-worker
+```
+
+Verifique:
+
+```powershell
+docker ps
+docker logs --tail 20 slic-worker-windows
+ipconfig
+```
+
+O log deverá informar `worker-windows iniciado na porta gRPC 50051`. Os dados da réplica ficam em `slic-replica-windows`, mesmo que o container seja recriado.
+
+### B.2. Notebook Lubuntu — construir imagens e criar rede
+
+No terminal, na raiz do projeto:
 
 ```bash
-curl -i http://localhost:8080/api/health
-curl -s http://localhost:8080/api/workers
+cd ~/Desktop/Trabalho_pratico_computacao_distribuida
 ```
 
-`/api/health` informa o estado do coordenador; `/api/workers` consulta os workers pela infraestrutura gRPC. Dois resultados com `status: "UP"` indicam que ambos responderam.
-
-### 5. Consultar logs
+**ATENÇÃO: OS DOIS BUILDS ABAIXO PODEM DEMORAR VÁRIOS MINUTOS, ESPECIALMENTE O MAVEN DO COORDENADOR.**
 
 ```bash
-docker compose logs --tail=100 coordinator
-docker compose logs --tail=100 worker-1 worker-2
+sudo docker build -t cd-slic-worker ./worker
+sudo docker build -t cd-slic-coordinator ./coordinator
 ```
 
-Para acompanhar continuamente:
+Se a rede ainda não existir, crie-a:
 
 ```bash
-docker compose logs -f coordinator worker-1 worker-2
+sudo docker network inspect cd-slic-lan >/dev/null 2>&1 || sudo docker network create cd-slic-lan
 ```
 
-Para **parar e remover os containers e a rede** (sem apagar as imagens geradas):
+Inicie o worker do Lubuntu **somente se ele ainda não existir**:
 
 ```bash
-docker compose down
-```
-
-Para **iniciar novamente sem reconstruir**:
-
-```bash
-docker compose up -d
-```
-
-## Executar e visualizar a primeira segmentação
-
-Todos os exemplos são executados na **raiz do repositório**. Escolha um arquivo local de imagem e substitua `foto.jpg` pelo seu caminho. Há uma fotografia de teste versionada no projeto (`imagem_teste_grande.jpg`); antes de redistribuí-la, confira direitos e créditos de uso.
-
-### Exemplo A — imagem inteira enviada a um worker
-
-```bash
-curl -fS -D cabecalhos_unico.txt \
-  -F 'file=@imagem_teste_grande.jpg' \
-  -F 'segments=500' \
-  -F 'compactness=10.0' \
-  http://localhost:8080/api/segment \
-  --output resultado_unico.png
-
-cat cabecalhos_unico.txt
-```
-
-A rota `/api/segment` envia **a imagem inteira para um worker**, sem divisão. Retorna `Content-Type: image/png` e cabeçalho `X-Worker-Id`.
-
-### Exemplo B — uma imagem dividida entre workers (principal)
-
-```bash
-curl -fS -D cabecalhos_teste.txt \
-  -F 'file=@imagem_teste_grande.jpg' \
-  -F 'segments=500' \
-  -F 'compactness=10.0' \
-  -F 'rows=2' \
-  -F 'cols=2' \
-  http://localhost:8080/api/segment-distributed \
-  --output resultado_teste.png
-
-cat cabecalhos_teste.txt
-```
-
-A opção `-fS` faz o `curl` reportar erros HTTP, `-D` grava cabeçalhos em arquivo e `--output` salva os bytes do PNG. **Não utilize `curl` sem `--output` para uma resposta binária**, pois o terminal poderá receber bytes ilegíveis.
-
-Abra o resultado:
-
-```bash
-xdg-open resultado_teste.png  # Linux com interface gráfica
-```
-
-No Windows, abra o arquivo salvo pelo Explorador; no macOS, use `open resultado_teste.png`.
-
-Uma resposta bem-sucedida deverá incluir `HTTP/1.1 200` e, conforme disponibilidade dos workers, cabeçalhos semelhantes a:
-
-```http
-Content-Type: image/png
-X-Tiles: 4
-X-Worker-Ids: worker-1,worker-2
-X-Tile-Workers: r0c0=worker-1,r0c1=worker-2,r1c0=worker-1,r1c1=worker-2
-X-Total-Time-Ms: 3051
-```
-
-`3051` é uma **medição histórica de uma execução**; não é um tempo garantido para outros computadores nem outras imagens. Os IDs dos workers podem variar conforme o rodízio e eventuais novas tentativas. O PNG deve ter as mesmas dimensões da imagem de entrada.
-
-### O que acontece em `http://localhost:8080/`?
-
-**Atenção:** na versão atual da `main`, a página HTML inicial ainda é a interface **legada de classificação distribuída de resíduos**. Ela envia imagens para `/api/classify`; **não** é a interface gráfica da nova segmentação. Para usar SLIC, utilize os comandos acima, Postman ou qualquer cliente capaz de enviar `multipart/form-data`.
-
-## Referência da API
-
-| Método | Caminho | Entrada | Saída |
-|---|---|---|---|
-| GET | `/api/health` | — | JSON do coordenador e relógio lógico |
-| GET | `/api/workers` | — | JSON com estado de cada worker |
-| POST | `/api/segment` | `file`, `segments`, `compactness` | PNG de um worker; cabeçalhos com o worker e Lamport |
-| POST | `/api/segment-distributed` | `file`, `segments`, `compactness`, `rows`, `cols` | PNG reconstruído; cabeçalhos de blocos/workers/tempo |
-| POST | `/api/classify` | `files` (um ou mais) | JSON de classificação **legada** |
-
-### `POST /api/segment-distributed`
-
-Envie corpo `multipart/form-data` com:
-
-| Campo | Padrão | Regras reais no código |
-|---|---:|---|
-| `file` | Obrigatório | imagem legível por `ImageIO`; máximo de arquivo 15 MB configurado no Spring |
-| `segments` | `100` | inteiro entre 2 e 5000; distribuído proporcionalmente à área entre os blocos, com mínimo 2 por bloco |
-| `compactness` | `8.0` | número real finito e positivo |
-| `rows` | `2` | inteiro entre 1 e 8 |
-| `cols` | `2` | inteiro entre 1 e 8 |
-
-Outras validações no serviço: imagem de no máximo **16 milhões de pixels**, e cada bloco com pelo menos **16 × 16 pixels**. Dimensões incompatíveis com a grade retornam erro 400. Não interprete `segments` como garantia de número exato de superpixels retornados.
-
-**Cabeçalhos específicos na resposta distribuída:** `X-Request-Id`, `X-Tiles`, `X-Total-Time-Ms`, `X-Coordinator-Lamport`, `X-Worker-Ids`, `X-Tile-Workers` e `Content-Type: image/png`. O corpo **não é JSON**, mas bytes PNG. Quando todos os workers falham, a API retorna um erro HTTP, não uma imagem incompleta.
-
-### `POST /api/segment`
-
-Recebe `file` + `segments` + `compactness` e usa um worker para a imagem inteira. Não oferece `rows` ou `cols`. Não confunda sua duração com a duração medida na versão dividida sem controlar imagem, condições e algoritmo.
-
-### `POST /api/classify` — somente compatibilidade
-
-```bash
-curl -s -F 'files=@imagem_teste_grande.jpg' \
-  http://localhost:8080/api/classify
-```
-
-Essa operação é **legada**. No repositório atual, as dependências Python `torch` e `torchvision` não estão instaladas, e não existe um modelo de classificação treinado versionado. Sem um modelo, o classificador retorna rótulos em modo `DEMO` se `ALLOW_DEMO_CLASSIFIER=true` (padrão do Compose), **não uma classificação visual válida**. Não é necessário instalar PyTorch para executar a segmentação SLIC.
-
-## Parâmetros e comportamento do SLIC
-
-SLIC (*Simple Linear Iterative Clustering*) agrupa pixels vizinhos em **superpixels** com base na proximidade espacial e semelhança visual. No worker, `segmenter.py` converte o bloco recebido em RGB, transforma-o em `numpy.ndarray` e executa `skimage.segmentation.slic`. Depois usa `mark_boundaries` para desenhar os limites vermelhos e salva um PNG.
-
-- `segments`: quantidade **aproximada** desejada no total; o coordenador reparte o alvo por blocos conforme a área. Pode haver diferença entre o solicitado e o obtido.
-- `compactness`: ajusta a relação entre regularidade espacial e aderência a diferenças visuais. Valores maiores tendem a favorecer regiões mais regulares, mas o resultado depende da imagem.
-- `rows` × `cols`: quantidade de tarefas retangulares, com máximo de 64 blocos (8×8). Mais blocos geram mais mensagens e mais custo de codificação; nem sempre melhoram o tempo total.
-
-**Limitação central:** SLIC é calculado independentemente em cada bloco. Superpixels próximos à linha de corte entre dois blocos não compartilham centros nem informações sobre regiões vizinhas; por isso podem surgir descontinuidades. A saída da API é uma **visualização PNG com bordas**, não uma matriz global de rótulos de superpixels, e não fornece segmentação semântica.
-
-## Testes automatizados
-
-Há **dois testes JUnit** no projeto Java:
-
-- `LamportClockTest`: testa incremento e atualização do relógio lógico ao receber mensagens;
-- `ImageTileRoundTripTest`: reconstrói uma imagem sintética de dimensões ímpares (285×177) e compara seus pixels com a imagem original, sem passar por SLIC.
-
-Com Java 17 + Maven instalado localmente:
-
-```bash
-cd coordinator
-mvn test
-cd ..
-```
-
-Resultado observado na execução do grupo: **2 testes, 0 falhas, `BUILD SUCCESS`**.
-
-**Importante:** `coordinator/Dockerfile` executa `mvn -DskipTests package`. Logo, `docker compose up --build` **não executa** os testes JUnit. Não há pipeline GitHub Actions na `main` auditada. Também não há testes automatizados de integração gRPC ou testes unitários Python atualmente versionados.
-
-## Testar distribuição, paralelismo e recuperação
-
-### Confirmar quais workers executaram os blocos
-
-```bash
-docker compose logs --tail=100 coordinator
-```
-
-Procure linhas `[TILE]` com `tile=r0c0`, `worker=worker-1` etc. Verifique `X-Tile-Workers` nos cabeçalhos HTTP para conferir distribuição entre workers.
-
-### Verificar sobreposição temporal
-
-```bash
-docker compose logs --timestamps --since 10m worker-1 worker-2
-```
-
-Compare os registros `Recebida tarefa` e `Tarefa ... concluída` dos dois workers. O experimento Full HD demonstrou que tarefas iniciaram em ambos os workers por volta de 10:41:01 UTC, antes da conclusão das tarefas às 10:41:02–03 UTC. Isso mostra sobreposição temporal; **não** é medição independente de speedup.
-
-### Interromper um worker e observar o failover
-
-> Execute o teste em um ambiente de desenvolvimento, não em um serviço usado por terceiros.
-
-```bash
-docker compose stop worker-2
-```
-
-Envie novamente a mesma imagem e os mesmos parâmetros:
-
-```bash
-curl -fS -D cabecalhos_sem_worker2.txt \
-  -F 'file=@imagem_teste_grande.jpg' \
-  -F 'segments=500' -F 'compactness=10.0' \
-  -F 'rows=2' -F 'cols=2' \
-  http://localhost:8080/api/segment-distributed \
-  --output resultado_sem_worker2.png
-
-cat cabecalhos_sem_worker2.txt
-```
-
-É esperado que **todos os blocos sejam realocados para `worker-1`** caso este esteja saudável e as chamadas caibam nos deadlines. A execução pode demorar mais por causa da tentativa de comunicação com `worker-2` indisponível. Se ambos os workers estiverem parados, não haverá segmentação bem-sucedida; a operação deverá retornar erro.
-
-Restaure o Worker 2:
-
-```bash
-docker compose up -d worker-2
-curl -s http://localhost:8080/api/workers
-```
-
-### Comparar arquivos de saída
-
-Para execuções equivalentes sobre a **mesma imagem e parâmetros**:
-
-```bash
-sha256sum resultado_teste.png resultado_sem_worker2.png
-cmp resultado_teste.png resultado_sem_worker2.png
-```
-
-Se os hashes coincidirem e `cmp` terminar sem saída (código 0), os PNGs são byte a byte idênticos. No teste registrado pelo grupo com a imagem **pequena**, os hashes foram idênticos. **Não assuma igualdade universal** para todas as imagens, plataformas, versões e cenários.
-
-## Resultados experimentais da primeira entrega
-
-Os números a seguir são **observações pontuais**, fornecidas pelo grupo durante testes com os três containers na mesma máquina, e não metas garantidas ou uma comparação controlada de desempenho.
-
-| Cenário | Imagem | Grade | Workers efetivos | Total medido pelo coordenador |
-|---|---|---|---|---:|
-| Segmentação distribuída pequena | 285×177 | 2×2 | worker-1 e worker-2 | **701 ms** |
-| Segmentação distribuída Full HD | 1920×1080 | 2×2 | worker-1 e worker-2 | **3.051 ms** |
-| Falha de `worker-2` (imagem pequena) | 285×177 | 2×2 | apenas worker-1 | **4.086 ms** |
-
-No teste Full HD, os quatro tempos locais registrados pelos workers foram 1.891, 1.896, 2.015 e 2.032 ms, parcialmente sobrepostos. O tempo total de 3.051 ms inclui, além do SLIC, a divisão/serialização, RPCs e montagem; ele **não** corresponde à soma dos tempos locais.
-
-No teste com falha (imagem pequena), o coordenador retornou HTTP 200 com os quatro blocos atribuídos ao Worker 1. Os PNGs produzidos antes e depois da falha apresentaram o mesmo SHA-256:
-
-```text
-1a94098c9511e04d7a5ca2700e8ce39fae4b1d43db4f6ffa53db895d7171f468
-```
-
-A alteração da latência é compatível com custos de tentativa/recuperação, mas não se isolou experimentalmente cada parcela desse tempo.
-
-**Sem alegação de aceleração:** para concluir speedup seria necessário estabelecer um baseline sequencial comparável, repetir as medições sob condições controladas e considerar overhead e diferenças na segmentação por blocos.
-
-Arquivos de evidência presentes na versão atual do repositório incluem `cabecalhos_distribuidos.txt`, `cabecalhos_grande.txt`, `cabecalhos_falha.txt`, `imagem_teste_grande.jpg`, `resultado_distribuido.png`, `resultado_grande.png` e `resultado_falha.png`.
-
-## Executar serviços em máquinas diferentes
-
-O experimento documentado usou containers na mesma máquina. É possível executar coordenador e workers em máquinas físicas diferentes **desde que haja conectividade TCP entre eles**; essa configuração **não foi validada** na primeira entrega.
-
-Exemplo de rede local:
-
-```text
-PC A — coordenador: 192.168.1.10:8080
-PC B — worker-1:   192.168.1.11:50051
-PC C — worker-2:   192.168.1.12:50051
-```
-
-Nos PCs B e C, clone o repositório e construa a imagem do worker:
-
-```bash
-docker build -t cd-slic-worker ./worker
-```
-
-Inicie no PC B:
-
-```bash
-docker run --rm -p 50051:50051 \
-  -e WORKER_ID=worker-1 -e GRPC_PORT=50051 \
-  -e ALLOW_DEMO_CLASSIFIER=true \
+sudo docker run -d \
+  --name slic-worker-lubuntu \
+  --network cd-slic-lan \
+  -e WORKER_ID=worker-lubuntu \
+  -e GRPC_PORT=50051 \
+  -e GRPC_THREADS=4 \
+  -e REPLICA_DIR=/app/data \
+  -v slic-replica-lubuntu:/app/data \
+  --restart unless-stopped \
   cd-slic-worker
 ```
 
-No PC C, use `WORKER_ID=worker-2` e a mesma porta **interna** `50051`:
+Inicie o coordenador (substitua `192.168.18.2` se o IP do Windows for diferente):
 
 ```bash
-docker run --rm -p 50051:50051 \
-  -e WORKER_ID=worker-2 -e GRPC_PORT=50051 \
-  -e ALLOW_DEMO_CLASSIFIER=true \
-  cd-slic-worker
-```
-
-No PC A, construa e inicie o coordenador:
-
-```bash
-docker build -t cd-slic-coordinator ./coordinator
-
-docker run --rm -p 8080:8080 \
-  -e WORKER_ADDRESSES=192.168.1.11:50051,192.168.1.12:50051 \
-  -e GRPC_DEADLINE_MS=4000 \
+sudo docker run -d \
+  --name slic-coordinator-lan \
+  --network cd-slic-lan \
+  -p 127.0.0.1:8080:8080 \
+  -e WORKER_ADDRESSES="slic-worker-lubuntu:50051,192.168.18.2:50051" \
+  -e GRPC_DEADLINE_MS=15000 \
+  -e REPLICATION_JOURNAL_DIR=/app/data/transactions \
+  -v slic-coordinator-state:/app/data \
+  --restart unless-stopped \
   cd-slic-coordinator
 ```
 
-Libere somente as portas necessárias na rede local e confirme conectividade/firewall/roteamento. O gRPC atual usa **`usePlaintext()` sem TLS nem autenticação**, adequado para laboratório isolado, **não para exposição direta à internet pública**. A chamada `/api/workers` a partir do PC A deve indicar o status dos dois nós antes de iniciar experimentos.
+**Para reutilizar os containers existentes**, não repita `docker run`:
 
-## Estrutura de arquivos
+```bash
+sudo docker start slic-worker-lubuntu
+sudo docker start slic-coordinator-lan
+```
+
+Verifique:
+
+```bash
+sudo docker ps
+sudo docker logs --tail 25 slic-coordinator-lan
+curl -fsS http://127.0.0.1:8080/api/workers | python3 -m json.tool
+```
+
+Esperado: `worker-lubuntu` e `worker-windows`, ambos `UP`. Se o Windows responder `UNAVAILABLE`, confira o IP, a rede, o firewall e o estado do Docker Desktop. Reiniciar um container não garante que o aplicativo dentro dele já esteja pronto; consulte novamente após a inicialização.
+
+> **Preservação de dados:** não execute `docker volume rm`, `docker compose down -v` ou `docker rm` sem distinguir container de volume. Mesmo depois de desligar os computadores, os volumes nomeados permanecem. O journal do coordenador deve ser montado exclusivamente por uma instância ativa, pois ele utiliza lock local.
+
+## Exemplos de uso e endpoints
+
+Execute os comandos `curl` a partir do **notebook Lubuntu** ou do host da opção A, na pasta onde está `imagem_teste_grande.jpg`.
+
+### 1. Ver os workers
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/workers | python3 -m json.tool
+```
+
+### 2. Segmentar sem transação
+
+```bash
+curl -fS \
+  -F 'file=@imagem_teste_grande.jpg' \
+  -F 'segments=500' \
+  -F 'compactness=10.0' \
+  -F 'rows=2' -F 'cols=2' \
+  http://127.0.0.1:8080/api/segment-distributed \
+  --output resultado_distribuido_local.png
+```
+
+Esse endpoint devolve **`image/png`** diretamente. Os cabeçalhos incluem `X-Request-Id`, `X-Tiles`, `X-Worker-Ids`, `X-Tile-Workers`, `X-Total-Time-Ms` e `X-Coordinator-Lamport`.
+
+### 3. Segmentar e replicar com 2PC
+
+```bash
+curl -fsS \
+  -F 'file=@imagem_teste_grande.jpg' \
+  -F 'segments=500' -F 'compactness=10.0' \
+  -F 'rows=2' -F 'cols=2' \
+  http://127.0.0.1:8080/api/segment-transactional \
+  | tee transacao_segmentacao.json \
+  | python3 -m json.tool
+```
+
+O retorno é **JSON** com um objeto `transaction` contendo `transactionId`, `resultId`, `decision`, `status`, `replicaCount` e `acknowledgedCount`. No sucesso, `COMMIT`, `COMMITTED` e **2 ACKs de 2 réplicas**.
+
+```bash
+TX=$(python3 -c 'import json; print(json.load(open("transacao_segmentacao.json"))["transaction"]["transactionId"])')
+RESULT=$(python3 -c 'import json; print(json.load(open("transacao_segmentacao.json"))["transaction"]["resultId"])')
+curl -fsS "http://127.0.0.1:8080/api/transactions/$TX" | python3 -m json.tool
+curl -fS "http://127.0.0.1:8080/api/results/$RESULT" --output resultado_transacional.png
+sha256sum resultado_distribuido_local.png resultado_transacional.png
+```
+
+Se forem as mesmas configurações e uma execução determinística, os hashes devem coincidir; teste a igualdade dos resultados em vez de pressupô-la.
+
+### 4. Replicar um PNG que já foi processado
+
+```bash
+curl -fsS -F 'file=@resultado_distribuido_local.png' \
+  http://127.0.0.1:8080/api/replicas \
+  | tee replicacao.json | python3 -m json.tool
+```
+
+Use `resultId` da resposta para consultar `GET /api/results/{resultId}`. O arquivo enviado deve ser PNG e ter até **14 MiB** no endpoint transacional. O gRPC utiliza limite de mensagem de 16 MiB, razão pela qual o endpoint aplica margem de segurança.
+
+### Referência resumida da API
+
+| Método | Endpoint | Função | Resposta |
+|---|---|---|---|
+| `GET` | `/api/health` | Saúde do coordenador | JSON |
+| `GET` | `/api/workers` | Saúde dos workers gRPC | JSON |
+| `POST` | `/api/segment` | SLIC da imagem inteira em um worker | PNG |
+| `POST` | `/api/segment-distributed` | SLIC por tiles, sem 2PC | PNG |
+| `POST` | `/api/segment-transactional` | SLIC por tiles seguido de 2PC | JSON |
+| `POST` | `/api/replicas` | 2PC de PNG existente | JSON |
+| `GET` | `/api/transactions/{transactionId}` | Estado de transação no journal | JSON |
+| `POST` | `/api/transactions/recover` | Solicitar reenvio de decisões pendentes | JSON |
+| `GET` | `/api/results/{resultId}` | Ler PNG confirmado de uma réplica válida | PNG |
+| `POST` | `/api/classify` | Classificação legada, modo demo se sem modelo | JSON |
+
+Parâmetros de segmentação: `file` obrigatório; `segments` (padrão 100; valor aceito 2–5000), `compactness` (padrão 8.0; positivo e finito), `rows`/`cols` (padrão 2×2; 1–8 cada). O coordenador valida limites de dimensão, tamanho e tiles.
+
+A página HTML na raiz (`GET /`) é uma interface **legada de classificação de resíduos**, não a interface gráfica do SLIC. A segmentação é acessada pelas APIs indicadas.
+
+## Persistência, 2PC e recuperação
+
+Cada worker persiste os bytes PNG e os metadados dos resultados em armazenamento local e mantém um **journal de participante SQLite**. Durante `PREPARE`, registra uma versão preparada antes de responder ao coordenador. Uma transação preparada não se torna visível por `ReadReplica` até `COMMIT`.
+
+O coordenador mantém um **journal de decisão em arquivos persistentes**, realizando escrita sincronizada e renomeação atômica no filesystem compatível. A decisão global `COMMIT`/`ABORT` é registrada **antes** de ser enviada aos workers. O job de recuperação tenta reenviar decisões sem ACK, inclusive após reinicialização; a rotina é agendada aproximadamente a cada **15 s** por padrão.
+
+| Estado público | Significado |
+|---|---|
+| `PREPARING` | Transação iniciada, decisão global ainda não consolidada |
+| `COMMIT_PENDING` | `COMMIT` persistido; faltam ACKs |
+| `COMMITTED` | `COMMIT` persistido e ACK de todos os participantes |
+| `ABORT_PENDING` | `ABORT` persistido; faltam ACKs |
+| `ABORTED` | `ABORT` persistido e ACK de todos os participantes |
+
+**Regra de publicação:** a API REST `/api/results/{id}` só devolve um resultado depois da decisão `COMMIT` **e de todos os ACKs**. A leitura tenta outro participante se a réplica preferencial estiver inacessível ou inválida e verifica o SHA-256. Um resultado abortado ou com COMMIT incompleto retorna erro (tipicamente HTTP **409**).
+
+**Regra de disponibilidade:** com dois participantes exigidos, uma falha antes de todos os votos conduz a `ABORT`; 2PC **não** é um protocolo de consenso tolerante a partições nem permite confirmação irrestrita com menos votos. Depois de persistir `COMMIT`, o coordenador **não** pode revertê-lo para `ABORT` só porque perdeu um ACK.
+
+### Experimentos de falha já realizados
+
+Foram executados e registrados na segunda entrega:
+
+1. **Replicação em dois computadores:** PNG recuperado com mesmo SHA-256 do original.
+2. **Durabilidade:** transação confirmada consultável após reinício do Java e após desligamento dos dois computadores.
+3. **Falha de worker durante leitura:** o Lubuntu foi desligado e a leitura recuperou PNG idêntico da réplica Windows.
+4. **Falha antes de votar:** Windows indisponível no `PREPARE` → `ABORT_PENDING`, depois `ABORTED` com dois ACKs ao retornar; consulta ao resultado abortado retornou HTTP 409.
+5. **Falha depois da decisão:** injeção de encerramento do processo Python no Windows no primeiro `CommitReplica` (código 77), após `PREPARED`; decisão `COMMIT` ficou `COMMIT_PENDING` com um ACK, sendo recuperada para `COMMITTED` com dois ACKs e SHA-256 preservado.
+
+O teste 5 utiliza injeção **desativada por padrão**; consulte [`docs/ETAPA_5_FALHA_COMMIT_PENDENTE.md`](docs/ETAPA_5_FALHA_COMMIT_PENDENTE.md) para reexecutá-lo de forma controlada. Os procedimentos gerais de persistência, 2PC e recuperação estão em [`docs/ETAPA_4_COORDENADOR_2PC.md`](docs/ETAPA_4_COORDENADOR_2PC.md).
+
+Esses testes **não** demonstram tolerância a todas as possíveis falhas de hardware ou energia, nem eleições/consenso. Para não afetar seus dados, execute cenários destrutivos **somente em ambiente de laboratório**.
+
+## Testes automatizados
+
+Foram validados **24 testes Python** (persistência, idempotência, integridade, participante 2PC e injeção de falhas), além dos testes Java/JUnit do coordenador e do processamento de tiles, todos com sucesso na etapa de implementação.
+
+**ATENÇÃO: O MAVEN PODE LEVAR VÁRIOS MINUTOS SE PRECISAR BAIXAR DEPENDÊNCIAS.**
+
+Na raiz do projeto (Lubuntu):
+
+```bash
+sudo docker run --rm \
+  -v "$PWD/coordinator:/app" -w /app \
+  maven:3.9.9-eclipse-temurin-17 mvn -B test
+```
+
+Testes Python (executados dentro da imagem do worker):
+
+```bash
+sudo docker run --rm \
+  -v "$PWD/worker:/src:ro" -w /src \
+  cd-slic-worker python -m unittest discover -s tests -v
+```
+
+O `Dockerfile` do coordenador compila com testes pulados (`-DskipTests`). Portanto, **construir a imagem não substitui rodar `mvn test`**. As duas cópias de `classifier.proto` precisam permanecer compatíveis em Java e Python.
+
+## Benchmarks e resultados experimentais
+
+Os experimentos foram executados em **três rodadas**, cada uma com 2 aquecimentos e 10 medições por cenário. Foram **90 medições válidas** (30 por cenário; aquecimentos excluídos), sem falhas e com saída PNG de **4.607.902 bytes** e SHA-256 idêntico:
 
 ```text
-Trabalho_pratico_computacao_distribuida/
+870f39d917ae03fae238b882fc957b7ed85c5b944d9abc8c252b982dda2b9f62
+```
+
+**Entrada:** `imagem_teste_grande.jpg` (1920×1080), `segments=500`, `compactness=10.0`, grade 2×2. O caso com um worker foi executado no Lubuntu; o distribuído incluiu o PC Windows.
+
+| Indicador (tempo ponta a ponta) | 1 worker | 2 workers | 2 workers + 2PC |
+|---|---:|---:|---:|
+| Média (ms) | 2.796,76 | 1.956,47 | 2.482,78 |
+| **Mediana (ms)** | **2.717,48** | **1.907,29** | **2.419,33** |
+| Desvio-padrão amostral (ms) | 138,54 | 145,89 | 132,06 |
+| P95 (ms) | 3.067,81 | 2.200,92 | 2.704,78 |
+| Medições válidas | 30 | 30 | 30 |
+
+**Speedup observado:** `2.717,48 / 1.907,29 ≈ 1,425×` (**29,81% menos latência** na mediana). **Sobrecusto da opção com 2PC + recuperação do PNG:** `~26,85%` em relação aos dois workers sem 2PC. Mesmo com 2PC, a mediana ficou **10,97% abaixo** da configuração com apenas um worker.
+
+O custo medido **não é só o protocolo 2PC**: inclui comunicação, replicação persistente e um `GET` adicional para recuperar o PNG, permitindo ao cliente obter o arquivo final em todos os cenários. A execução de um único worker **não é SLIC sequencial puro**, pois os quatro tiles ainda podem ser processados concorrentemente. Os computadores também têm hardware e sistemas diferentes; não extrapole os percentuais para clusters homogêneos ou outras imagens.
+
+![Comparação das medianas](benchmarks/analise/grafico_04_comparacao_geral.png)
+
+Arquivos reproduzíveis:
+
+- Script: [`benchmarks/benchmark_slic.py`](benchmarks/benchmark_slic.py).
+- Metodologia: [`docs/ETAPA_6_BENCHMARKS.md`](docs/ETAPA_6_BENCHMARKS.md).
+- Resultados brutos: `benchmarks/resultados/rodada_01`, `rodada_02`, `rodada_03` (CSV e JSON).
+- Análise consolidada: [`benchmarks/analise/ANALISE_BENCHMARKS.md`](benchmarks/analise/ANALISE_BENCHMARKS.md).
+- Gráficos: [`benchmarks/analise/`](benchmarks/analise/).
+
+### Reproduzir os benchmarks com duas máquinas
+
+Depois de iniciar a infraestrutura da opção B, crie **uma instância adicional do coordenador** para a configuração com um worker. Ela deve utilizar **journal e volume próprios**, pois o journal não permite duas instâncias simultâneas no mesmo diretório.
+
+```bash
+sudo docker run -d \
+  --name slic-coordinator-single-benchmark \
+  --network cd-slic-lan \
+  -p 127.0.0.1:8081:8080 \
+  -e WORKER_ADDRESSES="slic-worker-lubuntu:50051" \
+  -e GRPC_DEADLINE_MS=15000 \
+  -e REPLICATION_JOURNAL_DIR=/app/data/transactions \
+  -v slic-benchmark-single-state:/app/data \
+  cd-slic-coordinator
+```
+
+Se o container já existir, utilize `sudo docker start slic-coordinator-single-benchmark` em vez de repetir `docker run`.
+
+**ATENÇÃO: ESTA BATERIA EXECUTA 36 SEGMENTAÇÕES FULL HD E PODE DEMORAR VÁRIOS MINUTOS. EVITE TAREFAS PESADAS E NÃO DESLIGUE OS COMPUTADORES.**
+
+```bash
+python3 benchmarks/benchmark_slic.py \
+  --input imagem_teste_grande.jpg \
+  --single-url http://127.0.0.1:8081 \
+  --dual-url http://127.0.0.1:8080 \
+  --segments 500 --compactness 10.0 --rows 2 --cols 2 \
+  --warmups 2 --repeats 10 --seed 42 \
+  --expected-sha256 870f39d917ae03fae238b882fc957b7ed85c5b944d9abc8c252b982dda2b9f62 \
+  --output-dir benchmarks/resultados/nova_rodada
+```
+
+Para reproduzir as três rodadas originais, use sementes `42`, `43`, `44` e diretórios separados. A ordem dos cenários é embaralhada de modo reprodutível; os testes são sequenciais entre requisições. Compare média, mediana, desvio-padrão e P95 usando os arquivos gerados.
+
+## Estrutura do repositório
+
+```text
+.
 ├── coordinator/
-│   ├── Dockerfile
-│   ├── pom.xml
+│   ├── Dockerfile, pom.xml
 │   └── src/
 │       ├── main/java/br/pucminas/cd/waste/
-│       │   ├── clock/LamportClock.java
-│       │   ├── grpc/{WorkerClient,WorkerPool}.java
-│       │   ├── image/{ImageTiler,ImageAssembler}.java
-│       │   ├── service/{DistributedSegmentationService,
-│       │   │          DistributedTiledSegmentationService,...}.java
-│       │   └── controller/{SegmentationController,
-│       │                       DistributedTiledSegmentationController,...}.java
+│       │   ├── controller/      # APIs REST; inclui ReplicationController
+│       │   ├── grpc/            # WorkerClient, WorkerPool
+│       │   ├── image/           # divisão e montagem dos tiles
+│       │   ├── replication/     # ReplicationCoordinator e TransactionJournal
+│       │   ├── clock/           # relógio lógico de Lamport
+│       │   └── service/         # segmentação distribuída
 │       ├── main/proto/classifier.proto
-│       ├── main/resources/static/index.html      # interface legado
-│       └── test/java/...                         # testes JUnit
+│       └── test/
 ├── worker/
-│   ├── app.py                         # servidor gRPC
-│   ├── segmenter.py                   # SLIC e PNG
-│   ├── lamport.py                     # relógio lógico
-│   ├── classifier.py                  # classificador legado DEMO
-│   ├── proto/classifier.proto         # contrato Protobuf
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── models/                       # modelos opcionais legados
-├── docs/                              # parte da documentação original ainda é sobre classificação
-├── scripts/test-classify.sh           # teste da operação legada
-├── docker-compose.yml
-├── imagem_teste_grande.jpg            # imagem de experimento; crédito a verificar
-├── resultado_grande.png               # exemplo segmentado
+│   ├── app.py, segmenter.py, classifier.py, lamport.py
+│   ├── replica_store.py, transaction_participant.py
+│   ├── fault_injection.py, replica_rpc_cli.py
+│   ├── proto/classifier.proto
+│   └── tests/
+├── benchmarks/
+│   ├── benchmark_slic.py
+│   ├── resultados/rodada_{01,02,03}/
+│   └── analise/               # estatísticas e quatro gráficos
+├── docs/                      # guias das etapas e testes
+├── docker-compose.yml         # configuração herdada da primeira entrega
+├── docker-compose.segunda-entrega.yml
+├── imagem_teste_grande.jpg
+├── .gitignore
 └── README.md
 ```
 
-**Observação sobre a `main` auditada:** ela também contém `coordinator/target/`, uma árvore de arquivos intermediários gerados pelo Maven. Esses artefatos **não são necessários para executar o projeto** e idealmente não deveriam estar versionados.
+Arquivos de build Maven em `coordinator/target/` são ignorados pelo Git; não são código-fonte. Arquivos de saída de experimentos locais podem ficar não monitorados, e isso não implica falha no projeto.
 
-### Como evitar versionar arquivos de build
+## Solução de problemas e segurança
 
-No `.gitignore` da raiz, considere:
-
-```gitignore
-coordinator/target/
-__pycache__/
-*.py[cod]
-.venv/
-.env
-*.log
-.DS_Store
-```
-
-Para parar de acompanhar `target/` no Git, **sem apagar os arquivos locais**:
-
-```bash
-git rm -r --cached coordinator/target
-git add .gitignore
-git commit -m "Remove artefatos Maven do versionamento"
-```
-
-O comando acima **altera o índice do Git**; confira `git status` antes de criar o commit.
-
-### Ao modificar mensagens gRPC
-
-Existem **duas cópias** do contrato `classifier.proto` (uma em `coordinator/src/main/proto/` e outra em `worker/proto/`). Elas devem permanecer idênticas. Depois de alterar o contrato, sincronize ambas, reconstrua as imagens Docker e confira a compatibilidade dos campos. Os stubs Java/Python são gerados durante as construções; não é necessário editar classes geradas manualmente.
-
-## Solução de problemas
-
-| Sintoma | Verificação / possível correção |
+| Sintoma | Como investigar |
 |---|---|
-| `docker: command not found` | Instale Docker; consulte instruções oficiais para seu sistema |
-| `docker compose` não reconhecido | Instale plugin Compose v2, não apenas `docker-compose` legado |
-| `permission denied` no daemon | No Linux use `sudo docker ...` ou configure grupo `docker` com consciência do privilégio concedido |
-| Porta 8080/50051/50052 ocupada | Pare o serviço que está usando a porta ou altere as portas publicadas no Compose |
-| Compilação demorada na primeira execução | É normal baixar Maven/Java/Python; acompanhe logs e verifique rede/armazenamento |
-| Aviso sobre `buildx`/Bake | Pode ser apenas um aviso; instale Buildx se necessário e examine a saída final |
-| `GET /api/workers` retorna `UNAVAILABLE` | Verifique `docker compose ps`, logs, DNS interno e portas dos workers |
-| `curl` retorna 400 | Confirme imagem válida, limites e campos `file`, `segments`, `compactness`, `rows`, `cols` |
-| `curl` retorna 503 | Nenhum worker concluiu um bloco; examine deadlines, falhas de rede e logs |
-| Resposta gRPC excede limite | Limite do cliente Java/servidor Python é 16 MiB; teste blocos menores ou ajuste limites cuidadosamente |
-| Imagem grande falha por timeout | `GRPC_DEADLINE_MS` vale 4000 por padrão; aumente temporariamente no Compose e recrie coordenador, se necessário |
-| Página inicial só mostra classificação | Comportamento esperado: HTML legado; para SLIC use `/api/segment-distributed` |
-| `torch` ausente | Esperado: SLIC não usa PyTorch. Classificador real legado exigiria modelo e dependências extras |
-| Resultados têm linhas diferentes perto dos cortes | SLIC é local por bloco; não se garante equivalência global |
-| `mvn test` não é executado no build Docker | Execute separadamente `cd coordinator && mvn test` |
+| `curl: (7) Failed to connect ... 8080` | O coordenador não está iniciado: `sudo docker ps -a`; reinicie o container existente com `sudo docker start slic-coordinator-lan`. |
+| Um worker aparece `UNAVAILABLE` | Verifique `docker ps`, logs, IP da Ethernet do Windows, porta 50051 e regra de firewall. Aguarde o processo Python iniciar. |
+| `UNIMPLEMENTED` em chamada 2PC | Contrato `.proto`/imagem Docker antigos; atualize a branch e reconstrua a imagem do worker correspondente. |
+| `ABORT_PENDING` | Uma decisão `ABORT` já foi persistida, mas faltam ACKs. Restaure o worker, depois execute `POST /api/transactions/recover`. |
+| `COMMIT_PENDING` | A decisão `COMMIT` é durável; não altere manualmente para `ABORT`. Restaure o worker e faça recovery. |
+| HTTP 409 ao ler PNG | A transação foi abortada ou ainda não está completamente confirmada. Consulte `/api/transactions/{id}`. |
+| `docker run` diz que o nome já existe | Use `docker start` para reativar o container configurado anteriormente. |
+| `permission denied` no Docker Linux | Use `sudo docker ...` ou configure o acesso ao daemon conscientemente. |
+| Erro de porta `8080` em uso | Não execute os dois coordenadores de demonstração na mesma porta; escolha o modo de execução antes. |
+| Aviso sobre `buildx` no Lubuntu | Pode ser apenas um aviso do builder legado; confirme se o build terminou com sucesso. |
+| Resultados SLIC diferem nas bordas dos tiles | É uma limitação do processamento independente por blocos. |
+| `mvn test` produz muitos arquivos | Normal: resultados de build em `coordinator/target/` são ignorados no Git. |
 
-Para coletar logs de diagnóstico sem ocultar a causa da falha:
+**Segurança:** a API REST e o gRPC não oferecem autenticação; o gRPC usa **plaintext**, sem TLS. Não publique as portas desses serviços na internet. No laboratório com duas máquinas, mantenha a porta `50051/TCP` do Windows restrita ao notebook na rede privada. A demonstração não é um serviço pronto para produção.
 
-```bash
-docker compose logs --tail=150 coordinator worker-1 worker-2
-```
+**Persistência:** o journal do coordenador pressupõe filesystem que aceite *rename* atômico e escrita sincronizada (*fsync*). Os volumes dos workers armazenam bancos SQLite e arquivos PNG. Evite apagar, recriar sem montar os volumes ou modificar manualmente os dados duráveis. Se os endereços dos participantes mudarem enquanto houver decisões pendentes, o recovery pode deixar de alcançá-los.
 
-## Limitações e melhorias possíveis
+## Limitações e equipe
 
-- **Sem SLIC global equivalente:** ausência de sobreposição (*halo*) e reconciliação de superpixels entre fronteiras.
-- **Sem comparação controlada de speedup:** medir adequadamente baseline, overhead e escalabilidade em condições constantes.
-- **Coordenador único:** sem alta disponibilidade do próprio coordenador.
-- **Failover básico:** novas tentativas com deadline; sem persistência de fila, checkpoint distribuído, detector de falhas avançado ou replicação coordenada.
-- **Sem TLS/autenticação:** protótipo destinado a ambiente de laboratório; cuidado com exposição de portas.
-- **Limites de recursos:** o processamento decodifica imagens e gera PNGs em memória; entradas excessivas podem afetar a disponibilidade.
-- **Interface web antiga:** uma futura página poderá oferecer visualização lado a lado, upload, seleção de grade e tempos.
-- **Testes incompletos:** faltam testes de integração ponta a ponta automatizados e testes isolados de SLIC sob múltiplos parâmetros.
+**Limitações conhecidas:** SLIC independente por tile (sem reconciliação nas bordas); coordenador único e ponto único de falha; 2PC bloqueante; conjunto fixo de participantes sem consenso/eleição; ausência de TLS e autenticação; limite de PNG transacional de 14 MiB, sem streaming; benchmarks limitados a uma imagem e a máquinas heterogêneas. Os experimentos de falha cobrem cenários específicos e **não** todas as possíveis janelas de falha, nem falhas físicas de disco/energia.
 
-## Participantes, IA e referências (em andamento)
-
-**Integrantes:**
+**Integrantes do grupo:**
 
 - Mateus Resende Ottoni
 - Felipe Pereira da Silva
@@ -546,7 +499,10 @@ docker compose logs --tail=150 coordinator worker-1 worker-2
 - Kauan Gabriel Pereira
 - Diego Feitosa
 
+**Uso de IA:** o grupo utilizou ferramentas de IA como apoio técnico e de documentação. A declaração acadêmica precisa identificar os usos efetivos de IA, conforme as regras da disciplina; não é adequado apresentar textos ou experimentos gerados por IA como trabalho ou execução exclusivamente humana.
+
+**Referências de implementação:** [`docs/ETAPA_4_COORDENADOR_2PC.md`](docs/ETAPA_4_COORDENADOR_2PC.md), [`docs/ETAPA_5_FALHA_COMMIT_PENDENTE.md`](docs/ETAPA_5_FALHA_COMMIT_PENDENTE.md), [`docs/ETAPA_6_BENCHMARKS.md`](docs/ETAPA_6_BENCHMARKS.md) e [`benchmarks/analise/ANALISE_BENCHMARKS.md`](benchmarks/analise/ANALISE_BENCHMARKS.md).
 
 ---
 
-**Situação da primeira entrega:** protótipo distribuído funcional e testado com duas instâncias worker; a segunda entrega poderá aprofundar tolerância a falhas e avaliação de desempenho conforme o enunciado. Este README descreve o estado da branch `main` auditado em **21 de outubro de 2026**.
+**Estado documentado:** branch `features/segunda_entrega`, após o commit de limpeza `6cf4db8`, novembro de 2026. A branch `main` continua representando a primeira entrega até eventual integração explícita.

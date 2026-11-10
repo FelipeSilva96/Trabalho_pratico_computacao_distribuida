@@ -1,0 +1,50 @@
+# Ambiente LOCAL de demonstracao da segunda entrega.
+# Sao dois processos workers independentes, porem NA MESMA maquina fisica.
+# Para duas maquinas fisicas, consulte README.md.
+services:
+  coordinator:
+    build:
+      context: ./coordinator
+    environment:
+      WORKER_ADDRESSES: worker-1:50051,worker-2:50051
+      GRPC_DEADLINE_MS: "15000"
+      REPLICATION_JOURNAL_DIR: /app/data/transactions
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - coordinator-state:/app/data
+    depends_on:
+      - worker-1
+      - worker-2
+    restart: unless-stopped
+
+  worker-1:
+    build:
+      context: ./worker
+    environment:
+      WORKER_ID: worker-1
+      GRPC_PORT: "50051"
+      GRPC_THREADS: "4"
+      REPLICA_DIR: /app/data
+      ALLOW_DEMO_CLASSIFIER: "true"
+    volumes:
+      - replica-worker-1:/app/data
+    restart: unless-stopped
+
+  worker-2:
+    build:
+      context: ./worker
+    environment:
+      WORKER_ID: worker-2
+      GRPC_PORT: "50051"
+      GRPC_THREADS: "4"
+      REPLICA_DIR: /app/data
+      ALLOW_DEMO_CLASSIFIER: "true"
+    volumes:
+      - replica-worker-2:/app/data
+    restart: unless-stopped
+
+volumes:
+  coordinator-state:
+  replica-worker-1:
+  replica-worker-2:
